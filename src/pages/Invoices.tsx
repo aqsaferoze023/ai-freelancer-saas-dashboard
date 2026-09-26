@@ -1,0 +1,76 @@
+import { useMemo, useState } from "react";
+import { ArrowDownToLine, ArrowRight, Check, CircleDollarSign, Clock3, FileText, Plus, Search, Send, ShieldCheck, Trash2 } from "lucide-react";
+import { Avatar, Badge, Button, EmptyState, Field, Input, Modal, PageHeader, Panel, Select } from "../components/ui";
+import { useAppStore } from "../store/useAppStore";
+import type { Invoice, InvoiceItem, InvoiceStatus } from "../types";
+import { currency, shortDate } from "../utils/format";
+
+const invoiceStatuses: InvoiceStatus[] = ["Draft", "Pending", "Paid", "Overdue"];
+const statusTone: Record<InvoiceStatus, string> = { Draft: "neutral", Pending: "amber", Paid: "green", Overdue: "rose" };
+
+export default function InvoicesPage() {
+  const { invoices, clients, updateInvoiceStatus, addToast } = useAppStore();
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState("All invoices");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [preview, setPreview] = useState<Invoice | null>(null);
+  const filtered = useMemo(() => invoices.filter((invoice) => {
+    const client = clients.find((item) => item.id === invoice.clientId);
+    return `${invoice.number} ${client?.company ?? ""}`.toLowerCase().includes(search.toLowerCase()) && (filter === "All invoices" || invoice.status === filter);
+  }).sort((a, b) => new Date(b.issueDate).getTime() - new Date(a.issueDate).getTime()), [invoices, clients, filter, search]);
+  const sumByStatus = (status: InvoiceStatus) => invoices.filter((invoice) => invoice.status === status).reduce((sum, invoice) => sum + invoice.amount, 0);
+  const paidCount = invoices.filter((invoice) => invoice.status === "Paid").length;
+
+  return (
+    <div>
+      <PageHeader eyebrow="GET PAID WITH CLARITY" title="Invoices" description="Create clear, professional invoices and stay on top of every payment." action={<Button variant="primary" onClick={() => setCreateOpen(true)}><Plus size={15} />Create invoice</Button>} />
+      <div className="finance-summary-grid"><Summary label="Total invoiced" value={currency(invoices.reduce((sum, invoice) => sum + invoice.amount, 0))} sub={`${invoices.length} invoices sent`} icon={FileText} tone="wine" /><Summary label="Paid" value={currency(sumByStatus("Paid"))} sub={`${paidCount} payments received`} icon={Check} tone="green" /><Summary label="Pending" value={currency(sumByStatus("Pending"))} sub={`${invoices.filter((invoice) => invoice.status === "Pending").length} awaiting payment`} icon={Clock3} tone="amber" /><Summary label="Overdue" value={currency(sumByStatus("Overdue"))} sub={`${invoices.filter((invoice) => invoice.status === "Overdue").length} need a nudge`} icon={CircleDollarSign} tone="rose" /></div>
+      <Panel className="data-panel"><div className="list-toolbar"><div className="filter-tabs">{["All invoices", ...invoiceStatuses].map((item) => <button className={`filter-tab ${filter === item ? "active" : ""}`} key={item} onClick={() => setFilter(item)}>{item}<span>{item === "All invoices" ? invoices.length : invoices.filter((invoice) => invoice.status === item).length}</span></button>)}</div><div className="toolbar-controls"><label className="table-search"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search invoices" aria-label="Search invoices" /></label></div></div>
+        {filtered.length ? <div className="table-scroll"><table className="data-table"><thead><tr><th>Invoice</th><th>Client</th><th>Amount</th><th>Issue date</th><th>Due date</th><th>Status</th><th className="action-col" /></tr></thead><tbody>{filtered.map((invoice) => { const client = clients.find((item) => item.id === invoice.clientId); return <tr key={invoice.id} className="clickable-row" onClick={() => setPreview(invoice)}><td><div className="table-person proposal-person"><span className="document-mark"><FileText size={15} /></span><div><strong>{invoice.number}</strong><span>{invoice.items?.[0]?.description ?? "Freelance services"}</span></div></div></td><td><div className="table-person client-mini"><Avatar name={client?.name ?? "Client"} color={client?.color ?? "slate"} size="sm" /><span>{client?.company ?? "Client"}</span></div></td><td><strong className="table-number">{currency(invoice.amount)}</strong></td><td><span className="table-muted">{shortDate(invoice.issueDate)}</span></td><td><span className="table-muted">{shortDate(invoice.dueDate)}</span></td><td onClick={(event) => event.stopPropagation()}><Select className="status-pill-select" value={invoice.status} aria-label={`Update ${invoice.number} status`} onChange={(event) => { updateInvoiceStatus(invoice.id, event.target.value as InvoiceStatus); addToast("Invoice status updated.", "info"); }}>{invoiceStatuses.map((status) => <option key={status}>{status}</option>)}</Select></td><td><button className="row-more" onClick={(event) => { event.stopPropagation(); setPreview(invoice); }} aria-label={`View ${invoice.number}`}><ArrowRight size={15} /></button></td></tr>; })}</tbody></table></div> : <EmptyState title="No invoices found" description="Try another search or create an invoice for your latest milestone." action={<Button variant="primary" onClick={() => setCreateOpen(true)}><Plus size={14} />Create invoice</Button>} />}
+        <div className="table-footer"><span><strong>{filtered.length}</strong> invoices</span><span className="footer-muted">Payments are tracked locally in this demo</span></div>
+      </Panel>
+      <InvoiceEditor open={createOpen} onClose={() => setCreateOpen(false)} />
+      <InvoicePreview invoice={preview} clientName={clients.find((client) => client.id === preview?.clientId)?.company ?? "Client"} onClose={() => setPreview(null)} />
+    </div>
+  );
+}
+
+function Summary({ label, value, sub, icon: Icon, tone }: { label: string; value: string; sub: string; icon: typeof FileText; tone: string }) {
+  return <Panel className="finance-summary"><span className={`summary-icon summary-icon-${tone}`}><Icon size={16} /></span><div><span>{label}</span><strong>{value}</strong><small>{sub}</small></div></Panel>;
+}
+
+function InvoiceEditor({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { clients, projects, invoices, addInvoice, addToast } = useAppStore();
+  const [clientId, setClientId] = useState(clients[0]?.id ?? "");
+  const [projectId, setProjectId] = useState("");
+  const [issueDate, setIssueDate] = useState(new Date().toISOString().slice(0, 10));
+  const [dueDate, setDueDate] = useState(() => { const due = new Date(); due.setDate(due.getDate() + 14); return due.toISOString().slice(0, 10); });
+  const [items, setItems] = useState<InvoiceItem[]>([{ id: `item-${Date.now()}`, description: "Design services", quantity: 1, rate: 1200 }]);
+  const [tax, setTax] = useState("0");
+  const [discount, setDiscount] = useState("0");
+  const [notes, setNotes] = useState("Thank you for the opportunity to work together.");
+  const [terms, setTerms] = useState("Due within 14 days");
+  const subtotal = items.reduce((sum, item) => sum + (item.quantity * item.rate), 0);
+  const taxTotal = subtotal * (Number(tax) / 100);
+  const total = Math.max(0, subtotal + taxTotal - Number(discount));
+
+  const updateItem = (id: string, key: keyof InvoiceItem, value: string) => setItems((current) => current.map((item) => item.id === id ? { ...item, [key]: key === "quantity" || key === "rate" ? Number(value) : value } : item));
+  const submit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const next = Math.max(1042, ...invoices.map((invoice) => Number(invoice.number.replace("INV-", "")) || 0)) + 1;
+    addInvoice({ id: `i-${Date.now()}`, number: `INV-${next}`, clientId, projectId: projectId || undefined, amount: total, subtotal, tax: taxTotal, discount: Number(discount), issueDate: new Date(`${issueDate}T12:00:00`).toISOString(), dueDate: new Date(`${dueDate}T12:00:00`).toISOString(), status: "Pending", items, notes: `${notes}\n\n${terms}` });
+    addToast(`Invoice INV-${next} created.`); onClose();
+  };
+
+  return <Modal open={open} onClose={onClose} title="Create an invoice" description="Add line items and send a clear summary of the work completed." size="lg"><form className="invoice-editor-layout" onSubmit={submit}><div className="invoice-editor-fields"><div className="form-grid"><Field label="Client"><Select value={clientId} onChange={(event) => setClientId(event.target.value)}>{clients.map((client) => <option key={client.id} value={client.id}>{client.company}</option>)}</Select></Field><Field label="Project"><Select value={projectId} onChange={(event) => setProjectId(event.target.value)}><option value="">No project linked</option>{projects.filter((project) => project.clientId === clientId).map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</Select></Field></div><div className="form-grid"><Field label="Issue date"><Input type="date" value={issueDate} onChange={(event) => setIssueDate(event.target.value)} /></Field><Field label="Due date"><Input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></Field></div><div className="line-items-heading"><strong>Line items</strong><button type="button" className="text-link" onClick={() => setItems((current) => [...current, { id: `item-${Date.now()}`, description: "", quantity: 1, rate: 0 }])}><Plus size={13} />Add line</button></div><div className="invoice-line-items">{items.map((item) => <div className="invoice-line-row" key={item.id}><Input aria-label="Description" value={item.description} onChange={(event) => updateItem(item.id, "description", event.target.value)} placeholder="Description" /><Input aria-label="Quantity" type="number" min="1" value={item.quantity} onChange={(event) => updateItem(item.id, "quantity", event.target.value)} /><Input aria-label="Rate" type="number" min="0" value={item.rate} onChange={(event) => updateItem(item.id, "rate", event.target.value)} /><strong>{currency(item.quantity * item.rate)}</strong><button type="button" className="remove-line" onClick={() => setItems((current) => current.length > 1 ? current.filter((line) => line.id !== item.id) : current)} aria-label="Remove line item"><Trash2 size={14} /></button></div>)}</div><div className="form-grid"><Field label="Tax (%)"><Input type="number" min="0" max="100" value={tax} onChange={(event) => setTax(event.target.value)} /></Field><Field label="Discount ($)"><Input type="number" min="0" value={discount} onChange={(event) => setDiscount(event.target.value)} /></Field></div><div className="form-grid"><Field label="Payment terms"><Input value={terms} onChange={(event) => setTerms(event.target.value)} /></Field><Field label="Client note"><Input value={notes} onChange={(event) => setNotes(event.target.value)} /></Field></div><div className="modal-actions"><Button type="button" onClick={onClose}>Cancel</Button><Button type="submit" variant="primary"><Plus size={14} />Create invoice</Button></div></div><InvoicePreviewCard number={`INV-${Math.max(1042, ...invoices.map((invoice) => Number(invoice.number.replace("INV-", "")) || 0)) + 1}`} client={clients.find((client) => client.id === clientId)?.company ?? "Client name"} issueDate={issueDate} dueDate={dueDate} items={items} subtotal={subtotal} tax={taxTotal} discount={Number(discount)} total={total} notes={notes} terms={terms} /></form></Modal>;
+}
+
+function InvoicePreviewCard({ number, client, issueDate, dueDate, items, subtotal, tax, discount, total, notes, terms }: { number: string; client: string; issueDate: string; dueDate: string; items: InvoiceItem[]; subtotal: number; tax: number; discount: number; total: number; notes: string; terms: string }) {
+  return <div className="invoice-preview-sheet"><div className="invoice-preview-header"><div className="preview-brand"><span className="brand-symbol preview-brand-symbol"><span /><span /><span /></span><span>FreelanceOS</span></div><span className="preview-document-label">INVOICE</span></div><div className="invoice-preview-title"><div><small>INVOICE NUMBER</small><h3>{number}</h3></div><span className="invoice-preview-status">DRAFT</span></div><div className="invoice-preview-parties"><div><small>BILL TO</small><strong>{client}</strong><span>Client account</span></div><div><small>ISSUED</small><strong>{shortDate(new Date(`${issueDate}T12:00:00`).toISOString())}</strong><small>DUE DATE</small><strong>{shortDate(new Date(`${dueDate}T12:00:00`).toISOString())}</strong></div></div><div className="invoice-preview-items"><div className="invoice-preview-line invoice-preview-table-heading"><span>DESCRIPTION</span><span>QTY</span><span>RATE</span><span>AMOUNT</span></div>{items.map((item) => <div className="invoice-preview-line" key={item.id}><span>{item.description || "Service description"}</span><span>{item.quantity}</span><span>{currency(item.rate)}</span><strong>{currency(item.quantity * item.rate)}</strong></div>)}</div><div className="invoice-preview-totals"><div><span>Subtotal</span><strong>{currency(subtotal)}</strong></div><div><span>Tax</span><strong>{currency(tax)}</strong></div>{discount > 0 && <div><span>Discount</span><strong>-{currency(discount)}</strong></div>}<div className="invoice-grand-total"><strong>Total due</strong><strong>{currency(total)}</strong></div></div><div className="invoice-preview-note"><strong>Notes</strong><p>{notes}</p><small>{terms}</small></div><div className="preview-signoff">We appreciate your business. <ShieldCheck size={13} /></div></div>;
+}
+
+function InvoicePreview({ invoice, clientName, onClose }: { invoice: Invoice | null; clientName: string; onClose: () => void }) {
+  const lineSubtotal = invoice?.items?.reduce((sum, item) => sum + item.quantity * item.rate, 0) ?? invoice?.amount ?? 0;
+  const subtotal = invoice?.subtotal ?? lineSubtotal;
+  return <Modal open={Boolean(invoice)} onClose={onClose} title="Invoice preview" description="Review the invoice and payment status." size="lg">{invoice && <div className="invoice-preview-detail"><InvoicePreviewCard number={invoice.number} client={clientName} issueDate={invoice.issueDate} dueDate={invoice.dueDate} items={invoice.items ?? [{ id: "default", description: "Freelance services", quantity: 1, rate: invoice.amount }]} subtotal={subtotal} tax={invoice.tax ?? 0} discount={invoice.discount ?? 0} total={invoice.amount} notes={invoice.notes ?? "Thank you for working together."} terms="Payment due by the date shown above." /><div className="invoice-preview-actions"><Badge tone={statusTone[invoice.status]}>{invoice.status}</Badge><p>Issued {shortDate(invoice.issueDate)} · Due {shortDate(invoice.dueDate)}</p><Button variant="primary" onClick={() => { useAppStore.getState().updateInvoiceStatus(invoice.id, "Paid"); useAppStore.getState().addToast(`${invoice.number} marked as paid.`); onClose(); }}><Check size={14} />Mark as paid</Button><Button onClick={() => { navigator.clipboard?.writeText(`${invoice.number} · ${currency(invoice.amount)} · ${clientName}`); useAppStore.getState().addToast("Invoice summary copied.", "info"); }}><ArrowDownToLine size={14} />Copy summary</Button><Button onClick={() => { useAppStore.getState().addToast("Payment reminder drafted with AI.", "info"); onClose(); }}><Send size={14} />Draft reminder</Button></div></div>}</Modal>;
+}

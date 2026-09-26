@@ -1,0 +1,33 @@
+import { useMemo, useState } from "react";
+import { ArrowDownRight, ArrowUpRight, BriefcaseBusiness, Clock3, DollarSign, Download, TrendingUp, Wallet, type LucideIcon } from "lucide-react";
+import { ClientRevenueChart, ProfitabilityChart, RevenueChart, WeeklyHoursChart } from "../components/Charts";
+import { Button, Panel, SectionHeading, Select } from "../components/ui";
+import { useAppStore } from "../store/useAppStore";
+import { currency } from "../utils/format";
+
+const clientPalette = ["#59151b", "#395d51", "#858f72", "#a7804f", "#6e718b", "#c7aaa1"];
+
+export default function AnalyticsPage() {
+  const { clients, projects, timeEntries, invoices, addToast } = useAppStore();
+  const [period, setPeriod] = useState("Last 30 days");
+  const paidRevenue = invoices.filter((invoice) => invoice.status === "Paid").reduce((sum, invoice) => sum + invoice.amount, 0);
+  const hours = timeEntries.reduce((sum, entry) => sum + entry.hours, 0);
+  const billableHours = timeEntries.filter((entry) => entry.billable).reduce((sum, entry) => sum + entry.hours, 0);
+  const revenueByClient = useMemo(() => clients.map((client, index) => ({ name: client.company, revenue: client.totalRevenue, color: clientPalette[index % clientPalette.length] })).filter((item) => item.revenue > 0).sort((a, b) => b.revenue - a.revenue), [clients]);
+  const profitability = projects.filter((project) => !project.archived).map((project) => ({ name: project.name, margin: Math.max(18, Math.min(82, Math.round(((project.budget - project.hours * 46) / Math.max(project.budget, 1)) * 100))) }));
+
+  return (
+    <div>
+      <div className="analytics-heading"><div><div className="eyebrow">BETTER SIGNAL, BETTER DECISIONS</div><h1>Business analytics</h1><p>Understand what's working across your independent business.</p></div><div className="analytics-filter-actions"><Select value={period} onChange={(event) => setPeriod(event.target.value)} aria-label="Analytics date range"><option>Last 7 days</option><option>Last 30 days</option><option>Last 3 months</option><option>Last 12 months</option></Select><Button onClick={() => addToast("Your analytics report is ready to export.", "info")}><Download size={14} />Export report</Button></div></div>
+      <div className="analytics-stat-grid"><AnalyticsStat label="Revenue" value="$12,480" delta="18.4%" detail="vs. previous period" icon={DollarSign} tone="wine" /><AnalyticsStat label="Estimated profit" value="$8,860" delta="14.2%" detail="71% profit margin" icon={TrendingUp} tone="green" /><AnalyticsStat label="Business expenses" value="$3,620" delta="4.8%" detail="vs. previous period" icon={Wallet} tone="amber" down /><AnalyticsStat label="Billable hours" value={`${billableHours.toFixed(1)}h`} delta="11.6%" detail={`${hours.toFixed(1)}h total tracked`} icon={Clock3} tone="blue" /><AnalyticsStat label="Effective hourly rate" value={currency(Math.round(paidRevenue / Math.max(hours, 1)))} delta="6.3%" detail="based on paid work" icon={BriefcaseBusiness} tone="olive" /></div>
+      <div className="analytics-chart-grid"><Panel className="analytics-revenue-panel"><div className="panel-heading"><div><div className="panel-overline">INCOME & MARGIN</div><SectionHeading title="Revenue over time" /></div><div className="analytics-chart-legend"><span><i className="legend-dot revenue-dot" />Revenue</span><span><i className="legend-dot expense-dot" />Expenses</span><span><i className="legend-dot profit-dot" />Profit</span></div></div><RevenueChart period={period === "Last 7 days" ? "7D" : period === "Last 3 months" ? "3M" : period === "Last 12 months" ? "12M" : "30D"} /><div className="revenue-total-row"><span><small>Revenue in selected period</small><strong>$12,480</strong></span><span className="revenue-growth"><ArrowUpRight size={14} />18.4% growth</span></div></Panel><Panel className="client-revenue-panel"><div className="panel-heading"><div><div className="panel-overline">CLIENT MIX</div><SectionHeading title="Revenue by client" /></div></div><div className="client-revenue-chart-content"><div className="client-revenue-donut"><ClientRevenueChart data={revenueByClient} /><div className="donut-center"><span>LIFETIME</span><strong>{currency(clients.reduce((sum, client) => sum + client.totalRevenue, 0))}</strong></div></div><div className="client-revenue-legend">{revenueByClient.slice(0, 5).map((item) => <div key={item.name}><span><i style={{ background: item.color }} />{item.name}</span><strong>{currency(item.revenue)}</strong></div>)}</div></div></Panel></div>
+      <div className="analytics-lower-grid"><Panel className="profitability-panel"><div className="panel-heading"><div><div className="panel-overline">HEALTHY PROJECTS</div><SectionHeading title="Project profitability" /></div><span className="panel-subtext">Estimated margin</span></div><ProfitabilityChart data={profitability} /></Panel><Panel className="hours-analytics-panel"><div className="panel-heading"><div><div className="panel-overline">CAPACITY & FOCUS</div><SectionHeading title="Hours tracked" /></div><span className="hour-summary"><strong>{hours.toFixed(1)}h</strong><small>this month</small></span></div><WeeklyHoursChart /><div className="billable-insight"><span className="billable-insight-icon"><Clock3 size={14} /></span><p><strong>{Math.round(billableHours / Math.max(hours, 1) * 100)}% of time is billable.</strong> A balanced mix of client and studio time helps your business stay sustainable.</p></div></Panel></div>
+      <Panel className="analytics-insight"><div className="analytics-insight-icon"><TrendingUp size={17} /></div><div><span>AN OPPORTUNITY TO EXPLORE</span><h2>Your top three clients drive most of your business.</h2><p>Consider a small retainer or a quarterly check-in to keep those relationships growing.</p></div><Button onClick={() => addToast("Client revenue report opened.", "info")}>Explore client mix<ArrowUpRight size={13} /></Button></Panel>
+    </div>
+  );
+}
+
+function AnalyticsStat({ label, value, delta, detail, icon: Icon, tone, down = false }: { label: string; value: string; delta: string; detail: string; icon: LucideIcon; tone: string; down?: boolean }) {
+  const ChangeIcon = down ? ArrowDownRight : ArrowUpRight;
+  return <Panel className="analytics-stat"><div className="analytics-stat-head"><span>{label}</span><span className={`analytics-stat-icon analytics-icon-${tone}`}><Icon size={15} /></span></div><strong>{value}</strong><div className="analytics-stat-foot"><span className={down ? "stat-decrease" : "stat-increase"}><ChangeIcon size={12} />{delta}</span><span>{detail}</span></div></Panel>;
+}
